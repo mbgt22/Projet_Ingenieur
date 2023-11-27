@@ -1,0 +1,1097 @@
+---
+title: Statistical modeling of gene expression using epigenomic signals 
+subtitle: 'Part 1 - Data preparation'
+author: "Santa Kirezi, Nadia Ponts, Gaël Le Trionnaire, David Causeur"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+    latex_engine: xelatex
+    number_sections: true
+  html_document:
+    highlight: pygments
+    theme: readable
+    toc: yes
+    toc_depth: 2
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+header-includes:
+  - \usepackage{fontspec}
+  - \setmainfont{Arial}
+  - \usepackage{booktabs}
+  - \usepackage{tabu}
+  - \usepackage{float}
+  - \usepackage{xcolor}
+  - \usepackage{tcolorbox}
+  - \usepackage{colortbl}
+editor_options: 
+  markdown: 
+    wrap: 72
+linestretch: 1.2
+geometry: margin = 0.8in
+fontsize: 12pt
+vignette: null
+---
+
+```{=tex}
+\fontsize{8}{11}
+\setstretch{1.25}
+```
+```{r knitr_init, echo = FALSE, cache = FALSE}
+## Global options
+options(digits = 6, show.signif.stars = FALSE, width = 80)
+knitr::opts_chunk$set(echo = TRUE,
+                      cache = TRUE,
+                      prompt = FALSE,
+                      tidy = FALSE,
+                      comment = NA,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.width = 7,
+                      fig.height = 4.33)
+```
+
+```{r functions, include=FALSE}
+# A function for captioning and referencing images
+fig <- local({
+    i <- 0
+    ref <- list()
+    list(
+        cap=function(refName, text) {
+            i <<- i + 1
+            ref[[refName]] <<- i
+            paste("Figure ", i, ": ", text, sep="")
+        },
+        ref=function(refName) {
+            ref[[refName]]
+        })
+})
+```
+
+# Introduction
+
+```{r eval=TRUE,echo=FALSE,message=FALSE}
+require(zoo)
+require(knitr)
+require(tidyverse)
+require(kableExtra)
+require(rtracklayer)
+require(dplyr)
+require(tidyr)
+
+### roll_zero : TRUE if y contains a sequence of 
+### more than nucl consecutive zeroes
+
+roll_zero <- function(y,nucl){
+  return(any(rollapply(y, nucl, function(x) sum(x) < 1e-08)))                   
+}
+
+### Converts nan values to zero
+
+nan_to_zero <- function(x){
+  x[which(is.nan(x))] <- rep(0, sum(is.nan(x)))
+  return(x)
+}
+
+```
+
+# Importing data
+
+Epigenomic and transcriptomic signals are stored into three different
+files, one for each replicate. Data are imported into three `R` objects,
+of type \texttt{list}, named `l_express1`, `l_express2` and `l_express3`
+for the transcriptomic signals and `l_epigeno1`, `l_epigeno2` and
+`l_epigeno3` for the epigenomic signals.
+
+```{r import,cache=TRUE,message=FALSE,echo=FALSE}
+# last coordinate of each gene
+n_cols <- count.fields("data/NDPS25.cov.strand.split.UpDown.800bp.stranded.txt", 
+                       sep = "\t")
+v_to <- cumsum(n_cols)
+
+# first coordinate of each gene
+v_from <- c(1, v_to[-length(v_to)]+1)
+
+
+# list structure for each data table
+l_cut <- Map(function(from,to) seq(from = from, to = to, by = 1), v_from, v_to)
+
+## Transcriptomic signals
+
+express1 <- scan("data/NDPS25.cov.strand.split.UpDown.800bp.stranded.txt", 
+                 sep = "\t", what = character())                                                       
+   # import numeric signal as character
+l_express1 <- lapply(l_cut, function(cut,v) v[cut], v = express1)         
+   # place the data in l_cut
+gene_names <- unlist(lapply(l_express1, function(x) x[1]))                
+   # extract gene names
+names(l_express1) <- gene_names                                         
+   # name each element of the list with gene names
+l_express1 <- lapply(l_express1, function(v) v[-1])                       
+   # delete the name from the signal data
+l_express1 <- lapply(l_express1, as.numeric)                              
+   # turn signal to numeric again
+
+express2 <- scan("data/NDPS26.cov.strand.split.UpDown.800bp.stranded.txt", 
+                 sep = "\t", what = character())
+l_express2 <- lapply(l_cut, function(cut,v) v[cut],v = express2)
+names(l_express2) <- gene_names
+l_express2 <- lapply(l_express2, function(v) v[-1])
+l_express2 <- lapply(l_express2, as.numeric)
+
+express3 <- scan("data/NDPS27.cov.strand.split.UpDown.800bp.stranded.txt", 
+                 sep = "\t", what = character())
+l_express3 <- lapply(l_cut, function(cut,v) v[cut], v = express3)
+names(l_express3) <- gene_names
+l_express3 <- lapply(l_express3, function(v) v[-1])
+l_express3 <- lapply(l_express3, as.numeric)
+
+## Epigenomic signals
+
+epigeno1 <- scan("data/NDPS52.cov.UpDown.800bp.stranded.txt", 
+                 sep = "\t", what = character())
+l_epigeno1 <- lapply(l_cut,function(cut,v) v[cut],v = epigeno1)
+names(l_epigeno1) <- gene_names
+l_epigeno1 <- lapply(l_epigeno1, function(v) v[-1])
+l_epigeno1 <- lapply(l_epigeno1, as.numeric)
+
+epigeno2 <- scan("data/NDPS53.cov.UpDown.800bp.stranded.txt", 
+                 sep = "\t", what = character())
+l_epigeno2 <- lapply(l_cut, function(cut,v) v[cut], v = epigeno2)
+names(l_epigeno2) <- gene_names
+l_epigeno2 <- lapply(l_epigeno2, function(v) v[-1])
+l_epigeno2 <- lapply(l_epigeno2, as.numeric)
+
+epigeno3 <- scan("data/NDPS54.cov.UpDown.800bp.stranded.txt", 
+                 sep = "\t", what = character())
+l_epigeno3 <- lapply(l_cut, function(cut,v) v[cut], v = epigeno3)
+names(l_epigeno3) <- gene_names
+l_epigeno3 <- lapply(l_epigeno3, function(v) v[-1])
+l_epigeno3 <- lapply(l_epigeno3, as.numeric)
+```
+
+```{r,eval=FALSE,echo=FALSE}
+saveRDS(l_express1,"express1.rds")
+saveRDS(l_express2,"express2.rds")
+saveRDS(l_express3,"express3.rds")
+saveRDS(l_epigeno1,"epigeno1.rds")
+saveRDS(l_epigeno2,"epigeno2.rds")
+saveRDS(l_epigeno3,"epigeno3.rds")
+```
+
+The number of signals in all lists is the same, namely the number of
+genes:
+
+```{r genelength,echo=FALSE}
+df <- data.frame(Express1=length(l_express1),
+                 Express2=length(l_express2),
+                 Express3=length(l_express3),
+                 Epigeno1=length(l_express1),
+                 Epigeno2=length(l_express2),
+                 Epigeno3=length(l_express3))
+kable(df,booktabs=TRUE,caption="Number of signals in all data tables")
+```
+
+Components of all lists are named using the gene names provided in the
+raw data files. The 5 first gene names are extracted from list
+`l_express1` and shown below for illustration:
+
+```{r genenames}
+gene_names <- names(l_express1)
+gene_names[1:5]
+```
+
+All signals are pointwise measurements, either transcriptomic or
+epigenomic, at nucleotide positions in-between the start and stop codons
+of a gene but also at the 800 positions before the start and 800
+positions after the stop codon. Therefore, gene lengths can be deduced
+from the signal lengths by subtracting 1600. The plot below displays the
+distribution of gene lengths across the genome:
+
+```{r genelength_hist,fig.show='hold',fig.width=7,fig.asp=0.6,echo=FALSE}
+signal_length <- lapply(l_express1,length)
+gene_length <- unlist(signal_length)-1600
+hist(gene_length,
+     nclass=60,
+     proba=FALSE,
+     main="Distribution of gene lengths",
+     xlab="Gene lengths",
+     ylab="Counts",
+     bty="l",
+     col="tan1")
+grid()
+text(10000,2500,paste("Min:",min(gene_length)),adj=0)
+text(10000,2250,paste("Mean:",round(mean(gene_length),2)),adj=0)
+text(10000,2000,paste("Median:",round(median(gene_length),2)),adj=0)
+text(10000,1750,paste("Max:",max(gene_length)),adj=0)
+```
+
+For an illustrative purpose, both the epigenomic and transcriptomic
+signals of a gene, arbitrarily chosen with length close to the median
+gene length, are plotted below:
+
+```{r signal_plot,fig.height=10,echo=FALSE}
+select <- which.min(abs(gene_length-median(gene_length)))
+gene_name_select <- names(l_express1)[select]
+signal_length_select <- unlist(signal_length)[select]
+express_select <- data.frame(Rep1=l_express1[[select]],
+                             Rep2=l_express2[[select]],
+                             Rep3=l_express3[[select]])
+epigeno_select <- data.frame(Rep1=l_epigeno1[[select]],
+                             Rep2=l_epigeno2[[select]],
+                             Rep3=l_epigeno3[[select]])
+par(mfrow=c(2,1))
+matplot(1:signal_length_select,express_select,
+     type="l",col=c("tan1","tan2","tan3"),
+     bty="l",lty=1,
+     main=paste("Expression signals for gene ",gene_name_select),
+     xlab="Nucleotide positions",
+     ylab="Read counts")
+abline(v=c(800,signal_length_select-800),lty=3)
+text(400,90,"Before start",adj=c(0.5,0.5))
+text(1540,90,"Coding part",adj=c(0.5,0.5))
+text(2680,90,"After stop",adj=c(0.5,0.5))
+polygon(x=c(0,800,800,0),y=c(0,0,100,100),col=alpha("lightgray",0.2))
+polygon(x=c(2280,3080,3080,2280),y=c(0,0,100,100),col=alpha("lightgray",0.2))
+grid()
+matplot(1:signal_length_select,epigeno_select,
+     type="l",col=c("tan1","tan2","tan3"),
+     bty="l",lty=1,
+     main=paste("Epigenomic signals for gene ",gene_name_select),
+     xlab="Nucleotide positions",
+     ylab="Chromatin accessibility")
+abline(v=c(800,signal_length_select-800),lty=3)
+text(400,175,"Before start",adj=c(0.5,0.5))
+text(1540,175,"Coding part",adj=c(0.5,0.5))
+text(2680,175,"After stop",adj=c(0.5,0.5))
+polygon(x=c(0,800,800,0),y=c(0,0,200,200),col=alpha("lightgray",0.2))
+polygon(x=c(2280,3080,3080,2280),y=c(0,0,200,200),col=alpha("lightgray",0.2))
+grid()
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE,message=FALSE,results='hide'}
+rm(express_select)
+rm(epigeno_select)
+gc()
+```
+
+
+# Data quality control
+
+In this Section, transcriptomic and epigenomic data are explored to
+identify genes for which the signals should be suspected of poor quality
+and therefore removed from the subsequent analysis.
+
+## Overlapping genes
+
+In the raw data, the sequences of nucleotides before the start codon and
+after the stop codon of each gene has been arbitrarily chosen to be 800
+positions long. However, due to the density of the genome, the sequence
+after one stop codon for a gene may overlap with the sequence before the
+start codon for another one. This would affect the epigenomic signals
+measured for genes too close on the genome.
+
+In order to identify genes with a large overlap, we use information
+about the genome structure available in the file
+`FungiDB-58_FgraminearumPH-1.UpDown.800bp.sort.bed`. It is deduced from
+this file that the genome is made of four chromosomes with the following
+distribution of the numbers of genes:
+
+```{r gene_struct_chrom,echo=FALSE}
+genes_struct <- 
+  import("data/FungiDB-58_FgraminearumPH-1.UpDown.800bp.sort.bed")
+chrom <- as.vector(genes_struct@seqnames)
+chrom_names <- as.character(genes_struct@seqnames@values)   # chromosome names
+nb_chrom <- length(chrom_names)
+tab <- table(chrom)
+kable(tab,booktabs=TRUE,caption="Number of genes in each chromosome")
+```
+
+The distance between two genes will be calculated as the number of
+nucleotide positions between the stop codon of a gene and the start
+codon of the following gene.
+
+The following plot displays an histogram of the gene inter-distances:
+
+```{r intergene_hist,echo=FALSE,fig.show='hold',fig.width=7,fig.asp=0.6,echo=FALSE,message=FALSE}
+intergene_dist <- as.list(rep(0,nb_chrom))
+names(intergene_dist) <- chrom_names
+
+genes_start <- genes_struct@elementMetadata@listData$thick@start
+genes_end <- genes_start +
+  genes_struct@elementMetadata@listData$thick@width-1
+
+for (i in 1:nb_chrom) {
+  intergene <- rep(0,tab[i])
+  g_names <- gene_names[chrom==chrom_names[i]]
+  start <- genes_start[chrom==chrom_names[i]]
+  end <- genes_end[chrom==chrom_names[i]]
+  ord <- order(start,decreasing=FALSE)
+  intergene[1] <- start[ord][1]
+  intergene[-1] <- start[ord][-1]-end[ord][-tab[i]]
+  intergene_dist[[i]] <- intergene
+  names(intergene_dist[[i]]) <- g_names[ord]
+}
+
+hist(unlist(intergene_dist),
+     nclass=60,
+     proba=FALSE,
+     main="Distribution of gene inter-distances",
+     xlab="Gene inter-distances",
+     ylab="Counts",
+     bty="l",
+     col="tan1")
+grid()
+text(30000,6000,paste("Min:",min(unlist(intergene_dist))),adj=0)
+text(30000,5000,paste("Mean:",round(mean(unlist(intergene_dist)),2)),adj=0)
+text(30000,4000,paste("Median:",round(median(unlist(intergene_dist)),2)),adj=0)
+text(30000,3000,paste("Max:",max(unlist(intergene_dist))),adj=0)
+```
+```{r,echo=FALSE,message=FALSE,include=FALSE,results='hide'}
+rm(genes_struct)
+gc(verbose=FALSE)
+```
+
+Note that, in some few cases, inter-gene distance can be negative. For
+example, the two following genes are overlapping:
+
+```{r intergene_overlap,echo=FALSE}
+select_1 <- which(intergene_dist[[1]]<0)[1]
+select_2 <- select_1 - 1
+select <- gene_names %in% names(intergene_dist[[1]])[c(select_1,select_2)]
+df <- data.frame(Start=genes_start[select],End=genes_end[select])
+rownames(df) <- names(intergene_dist[[1]])[c(select_1,select_2)]
+kable(df,booktabs=TRUE,caption="Start and end positions of two overlapping genes")
+```
+
+Since the sequence before the start codon is suspected to be of major
+importance to explain the transcription, genes whose start codon is
+closer than 400 nucleotide positions from the stop codon of the
+preceding gene are removed from the data.
+
+```{r intergene_remove,echo=FALSE}
+l_out_intergene <- lapply(intergene_dist,function(d) d<=400)
+l_out_intergene <- lapply(l_out_intergene,function(s) {
+  id <- which(s)
+  names(s)[id]
+})
+out_intergene <- unlist(l_out_intergene)
+out_intergene <- which(gene_names %in% out_intergene)
+
+l_epigeno1 <- l_epigeno1[-out_intergene]
+l_epigeno2 <- l_epigeno2[-out_intergene]
+l_epigeno3 <- l_epigeno3[-out_intergene]
+
+l_express1 <- l_express1[-out_intergene]
+l_express2 <- l_express2[-out_intergene]
+l_express3 <- l_express3[-out_intergene]
+
+signal_length <- signal_length[-out_intergene]
+gene_length <- gene_length[-out_intergene]
+gene_names <- gene_names[-out_intergene]
+
+intergene_dist <- as.list(rep(0,nb_chrom))
+names(intergene_dist) <- chrom_names
+
+genes_start <- genes_start[-out_intergene]
+genes_end <- genes_end[-out_intergene]
+chrom <- chrom[-out_intergene]
+tab <- table(chrom)
+
+for (i in 1:nb_chrom) {
+  intergene <- rep(0,tab[i])
+  g_names <- gene_names[chrom==chrom_names[i]]
+  start <- genes_start[chrom==chrom_names[i]]
+  end <- genes_end[chrom==chrom_names[i]]
+  ord <- order(start,decreasing=FALSE)
+  intergene[1] <- start[ord][1]
+  intergene[-1] <- start[ord][-1]-end[ord][-tab[i]]
+  intergene_dist[[i]] <- intergene
+  names(intergene_dist[[i]]) <- g_names[ord]
+}
+
+l_out_intergene <- lapply(intergene_dist,function(d) d<=400)
+l_out_intergene <- lapply(l_out_intergene,function(s) {
+  id <- which(s)
+  names(s)[id]
+})
+out_intergene <- unlist(l_out_intergene)
+out_intergene <- which(gene_names %in% out_intergene)
+
+l_epigeno1 <- l_epigeno1[-out_intergene]
+l_epigeno2 <- l_epigeno2[-out_intergene]
+l_epigeno3 <- l_epigeno3[-out_intergene]
+
+l_express1 <- l_express1[-out_intergene]
+l_express2 <- l_express2[-out_intergene]
+l_express3 <- l_express3[-out_intergene]
+
+signal_length <- signal_length[-out_intergene]
+gene_length <- gene_length[-out_intergene]
+gene_names <- gene_names[-out_intergene]
+
+intergene_dist <- as.list(rep(0,nb_chrom))
+names(intergene_dist) <- chrom_names
+
+genes_start <- genes_start[-out_intergene]
+genes_end <- genes_end[-out_intergene]
+chrom <- chrom[-out_intergene]
+tab <- table(chrom)
+
+for (i in 1:nb_chrom) {
+  intergene <- rep(0,tab[i])
+  g_names <- gene_names[chrom==chrom_names[i]]
+  start <- genes_start[chrom==chrom_names[i]]
+  end <- genes_end[chrom==chrom_names[i]]
+  ord <- order(start,decreasing=FALSE)
+  intergene[1] <- start[ord][1]
+  intergene[-1] <- start[ord][-1]-end[ord][-tab[i]]
+  intergene_dist[[i]] <- intergene
+  names(intergene_dist[[i]]) <- g_names[ord]
+}
+
+hist(unlist(intergene_dist),
+     nclass=60,
+     proba=FALSE,
+     main="Distribution of gene inter-distances",
+     xlab="Gene inter-distances",
+     ylab="Counts",
+     bty="l",
+     col="tan1")
+grid()
+text(30000,4000,paste("Min:",min(unlist(intergene_dist))),adj=0)
+text(30000,3500,paste("Mean:",round(mean(unlist(intergene_dist)),2)),adj=0)
+text(30000,3000,paste("Median:",round(median(unlist(intergene_dist)),2)),adj=0)
+text(30000,2500,paste("Max:",max(unlist(intergene_dist))),adj=0)
+```
+
+The number of remaining genes in the data is now `r length(l_express1)`.
+
+```{r,echo=FALSE,message=FALSE,include=FALSE,results="hide"}
+rm(intergene)
+rm(intergene_dist)
+gc(verbose = FALSE)
+```
+
+## Intervals of zeroes in epigenomic signals
+
+Genes whose mean epigenomic signal is constantly zero before the start
+codon or after the stop codon, or show at least one sequence of more
+than hundred consecutive zeroes within the coding part will be
+considered as problematic in the following.
+
+First, transcriptomic and epigenomic signals are averaged over
+replicates, the mean signals being stored as lists in objects
+`l_mean_express` and `l_mean_epigeno` respectively.
+
+```{r mean_signals,cache=TRUE,echo=FALSE}
+# Mean transcriptomic signals
+
+l_mean_express <- Map("+", l_express1, l_express2)
+l_mean_express <- Map("+", l_mean_express, l_express3)
+l_mean_express <- lapply(l_mean_express, function(x) x/3)
+
+# Mean epigenomic signals
+
+l_mean_epigeno <- Map("+", l_epigeno1, l_epigeno2)
+l_mean_epigeno <- Map("+", l_mean_epigeno, l_epigeno3)
+l_mean_epigeno <- lapply(l_mean_epigeno, function(x) x/3)
+```
+
+Genes whose mean epigenomic signal is constantly zero before the start
+codon or after the stop codon, or show at least one sequence of more
+than hundred consecutive zeroes within the coding part are identified:
+
+```{r detect_epigeno_zero,cache=TRUE,echo=FALSE}
+epi_zero_1 <- lapply(l_mean_epigeno, 
+               function(x) sum(head(x, n = 800)) < 1e-08)
+epi_zero_2 <- lapply(l_mean_epigeno, 
+               function(x) roll_zero(x[-c(1:800, length(x) - (0:799))],100))
+epi_zero_3 <- lapply(l_mean_epigeno, 
+               function(x) sum(tail(x,n = 800)) < 1e-08)
+
+epi_zero <- Map("+", epi_zero_1, epi_zero_2)
+epi_zero <- Map("+", epi_zero, epi_zero_3)
+
+epi_zero <- which(unlist(epi_zero) > 0)
+```
+
+The following plot shows an example of a gene whose epigenomic signal is
+constantly zero before the stop codon:
+
+```{r signal_plot_epi_zero_1,fig.height=4,echo=FALSE,caption="Example of a gene whose epigenomic signal is zero before the start codon"}
+select <- which((unlist(epi_zero_1))&
+                  (!unlist(epi_zero_2))&
+                  (!unlist(epi_zero_3)))[1]
+gene_name_select <- names(l_express1)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+plot(1:signal_length_select,l_mean_epigeno[[select]],
+     type="l",col="tan3",
+     bty="l",lty=1,
+     main=paste("Mean epigenomic signal for gene ",gene_name_select),
+     xlab="Nucleotide positions",
+     ylab="Chromatin accessibility")
+abline(v=c(800,signal_length_select-800),lty=3)
+height_max <- max(l_mean_epigeno[[select]])
+text(400,height_max,"Before start",adj=c(0.5,0.5))
+text(800+gene_length_select/2,height_max,
+     "Coding part",adj=c(0.5,0.5))
+text(1200+gene_length_select,height_max,
+     "After stop",adj=c(0.5,0.5))
+polygon(x=c(0,800,800,0),y=c(0,0,1.2*height_max,1.2*height_max),
+        col=alpha("lightgray",0.2))
+polygon(x=c(800+gene_length_select,signal_length_select,
+            signal_length_select,800+gene_length_select),
+        y=c(0,0,1.2*height_max,1.2*height_max),col=alpha("lightgray",0.2))
+grid()
+```
+
+Similarly, the plot below shows an example of a gene whose epigenomic
+signal has one or more long sequence of consecutive zeroes within the
+coding part:
+
+```{r signal_plot_epi_zero_2,fig.height=4,echo=FALSE,caption="Example of a gene whose epigenomic signal has long sequences of zero between start and stop codons"}
+select <- which((!unlist(epi_zero_1))&
+                  (unlist(epi_zero_2))&
+                  (!unlist(epi_zero_3)))[1]
+gene_name_select <- names(l_express1)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+plot(1:signal_length_select,l_mean_epigeno[[select]],
+     type="l",col="tan3",
+     bty="l",lty=1,
+     main=paste("Mean epigenomic signal for gene ",gene_name_select),
+     xlab="Nucleotide positions",
+     ylab="Chromatin accessibility")
+abline(v=c(800,signal_length_select-800),lty=3)
+height_max <- max(l_mean_epigeno[[select]])
+text(400,height_max,"Before start",adj=c(0.5,0.5))
+text(800+gene_length_select/2,height_max,
+     "Coding part",adj=c(0.5,0.5))
+text(1200+gene_length_select,height_max,
+     "After stop",adj=c(0.5,0.5))
+polygon(x=c(0,800,800,0),y=c(0,0,1.2*height_max,1.2*height_max),
+        col=alpha("lightgray",0.2))
+polygon(x=c(800+gene_length_select,signal_length_select,
+            signal_length_select,800+gene_length_select),
+        y=c(0,0,1.2*height_max,1.2*height_max),col=alpha("lightgray",0.2))
+grid()
+```
+
+Finally, the plot below shows an example of a gene whose epigenomic
+signal is constantly zero after the stop codon:
+
+```{r signal_plot_epi_zero_3,fig.height=4,echo=FALSE,caption="Example of a gene whose epigenomic signal has only zeroes after the stop codon"}
+select <- which((!unlist(epi_zero_1))&
+                  (!unlist(epi_zero_2))&
+                  (unlist(epi_zero_3)))[1]
+gene_name_select <- names(l_express1)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+plot(1:signal_length_select,l_mean_epigeno[[select]],
+     type="l",col="tan3",
+     bty="l",lty=1,
+     main=paste("Mean epigenomic signal for gene ",gene_name_select),
+     xlab="Nucleotide positions",
+     ylab="Chromatin accessibility")
+abline(v=c(800,signal_length_select-800),lty=3)
+height_max <- max(l_mean_epigeno[[select]])
+text(400,height_max,"Before start",adj=c(0.5,0.5))
+text(800+gene_length_select/2,height_max,
+     "Coding part",adj=c(0.5,0.5))
+text(1200+gene_length_select,height_max,
+     "After stop",adj=c(0.5,0.5))
+polygon(x=c(0,800,800,0),y=c(0,0,1.2*height_max,1.2*height_max),
+        col=alpha("lightgray",0.2))
+polygon(x=c(800+gene_length_select,signal_length_select,
+            signal_length_select,800+gene_length_select),
+        y=c(0,0,1.2*height_max,1.2*height_max),col=alpha("lightgray",0.2))
+grid()
+```
+
+The number of genes with anomalies such as illustrated by the three
+plots above is `r length(epi_zero)`. Those genes are removed from the
+subsequent analysis.
+
+```{r remove_epigeno_zero,echo=FALSE}
+l_epigeno1 <- l_epigeno1[-epi_zero]
+l_epigeno2 <- l_epigeno2[-epi_zero]
+l_epigeno3 <- l_epigeno3[-epi_zero]
+
+l_express1 <- l_express1[-epi_zero]
+l_express2 <- l_express2[-epi_zero]
+l_express3 <- l_express3[-epi_zero]
+
+l_mean_epigeno <- l_mean_epigeno[-epi_zero]
+l_mean_express <- l_mean_express[-epi_zero]
+
+signal_length <- signal_length[-epi_zero]
+gene_length <- gene_length[-epi_zero]
+gene_names <- gene_names[-epi_zero]
+```
+
+## Signals with large variability across replicates
+
+There is no straightforward correspondence between replicates of
+transcriptomic and epigenomic data. Since the goal is to study the
+association between both types of signals, replicates will be used in a
+preprocessing step to identify genes for which the signals would not be
+reproducible.
+
+### Expression signals
+
+First, at each nucleotide position, the standard deviation over the
+three replicates of the expression measurements is derived for each
+gene.
+
+```{r sd_express,echo=FALSE}
+l_centered_express1 <- Map("-", l_express1, l_mean_express)
+l_centered_express2 <- Map("-", l_express2, l_mean_express)
+l_centered_express3 <- Map("-", l_express3, l_mean_express)
+
+l_sq_express1 <- lapply(l_centered_express1, function(x) x^2)
+l_sq_express2 <- lapply(l_centered_express2, function(x) x^2)
+l_sq_express3 <- lapply(l_centered_express3, function(x) x^2)                      
+
+l_sd_express <- Map("+", l_sq_express1, l_sq_express2)
+l_sd_express <- Map("+", l_sd_express, l_sq_express3)
+l_sd_express <- lapply(l_sd_express, function(x) sqrt(x/2))
+```
+
+The expression measurements being read counts, standard deviation highly
+depends on the mean expression. In order to illustrate this point, both
+the curves of standard deviations and mean expressions are summarized by
+their mean value over the nucleotide positions. The following plot shows
+the relationship between those average standard deviations and mean
+expressions:
+
+```{r mean_sd_plot,fig.height=6,echo=FALSE,cache=TRUE}
+mean_express <- unlist(lapply(l_mean_express,mean))
+sd_express <- unlist(lapply(l_sd_express,mean))
+plot(mean_express,sd_express,
+     pch=16,bty="l",col="tan1",
+     xlab="Mean expression",
+     ylab="Mean standard deviation",
+     main="Standard deviations and means of expression measurements")
+```
+
+```{r,echo=FALSE,message=FALSE,include=FALSE,results="hide"}
+rm(l_centered_express1)
+rm(l_centered_express2)
+rm(l_centered_express3)
+rm(l_sq_express1)
+rm(l_sq_express2)
+rm(l_sq_express3)
+rm(l_sd_express)
+rm(mean_express)
+rm(sd_express)
+gc(verbose = FALSE)
+```
+
+Therefore, a decision rule for excluding genes with poorly reproducible
+signals that would be based on the standard deviation solely would favor
+the exclusion of genes with large mean expression.
+
+This issue is addressed hereafter by a log$_{2}$-transformation of read
+counts. The following plot of the relationship between average standard
+deviations and mean expressions after log$_{2}$-transformation confirms
+that variability of expression is less straightforwardly dependent of
+the mean level, except for the lowest mean expressions:
+
+```{r log_mean_sd_plot,fig.height=6,echo=FALSE,cache=TRUE}
+l_log_express1 <- lapply(l_express1,function(x) log2(1+x))
+l_log_express2 <- lapply(l_express2,function(x) log2(1+x))
+l_log_express3 <- lapply(l_express3,function(x) log2(1+x))
+
+l_mean_log_express <- Map("+", l_log_express1, l_log_express2)
+l_mean_log_express <- Map("+", l_mean_log_express, l_log_express3)
+l_mean_log_express <- lapply(l_mean_log_express, function(x) x/3)
+
+l_centered_log_express1 <- Map("-", l_log_express1, l_mean_log_express)
+l_centered_log_express2 <- Map("-", l_log_express2, l_mean_log_express)
+l_centered_log_express3 <- Map("-", l_log_express3, l_mean_log_express)
+
+l_sq_log_express1 <- lapply(l_centered_log_express1, function(x) x^2)
+l_sq_log_express2 <- lapply(l_centered_log_express2, function(x) x^2)
+l_sq_log_express3 <- lapply(l_centered_log_express3, function(x) x^2)                      
+l_sd_log_express <- Map("+", l_sq_log_express1, l_sq_log_express2)
+l_sd_log_express <- Map("+", l_sd_log_express, l_sq_log_express3)
+l_sd_log_express <- lapply(l_sd_log_express, function(x) sqrt(x/2))
+
+mean_log_express <- unlist(lapply(l_mean_log_express,mean))
+sd_log_express <- unlist(lapply(l_sd_log_express,mean))
+
+plot(mean_log_express,sd_log_express,
+     pch=16,bty="l",col="tan1",
+     xlab="Mean expression",
+     ylab="Mean standard deviation",
+     main="Standard deviations and means of expression measurements")
+```
+
+The ratio of the standard deviation to the mean, namely the coefficient
+of variation, is used hereafter, to evaluate the variability of signals
+over the replicates and identify outliers. For each nucleotide position
+and each gene, a coefficient of variation is derived to measure the
+variability among replicates and, for each gene, the global variability
+of the whole expression signal is evaluated by the median coefficient of
+variation.
+
+The distribution of the median coefficient of variation over the genome
+is shown below:
+
+```{r cv_log_express_plot,,fig.height=6,echo=FALSE,cache=TRUE}
+l_cv_log_express <- Map("/", l_sd_log_express, l_mean_log_express)     
+   # coefficient of variation
+l_cv_log_express <- Map(nan_to_zero, l_cv_log_express)
+
+median_cv_log_express <- unlist(lapply(l_cv_log_express, median, na.rm = TRUE))
+
+hist(median_cv_log_express, nclass = 50, 
+     main = "log_expression: median coefficient of variation", 
+     bty = "l",
+     col = "orange", 
+     xlab = "Median coefficient of variation", 
+     ylab = "Counts", proba = FALSE)
+grid()
+```
+
+The plot above reveals some few genes for which the median coefficient
+of variations is abnormally large, close to one but smaller. The number
+of those genes, with median coefficient of variation larger than 0.8, is
+`r sum(median_cv_log_express>=0.8)`. However, since all coefficients of
+variation are smaller than 1, it is decided not to remove any genes
+based on the former inspection of the variability of expression signals
+across replicates.
+
+```{r,echo=FALSE,message=FALSE,include=FALSE,results="hide"}
+rm(l_cv_log_express)
+rm(median_cv_log_express)
+rm(l_log_express1)
+rm(l_log_express2)
+rm(l_log_express3)
+rm(l_mean_log_express)
+rm(l_centered_log_express1)
+rm(l_centered_log_express2)
+rm(l_centered_log_express3)
+rm(l_sq_log_express1)
+rm(l_sq_log_express2)
+rm(l_sq_log_express3)
+rm(l_sd_log_express)
+rm(mean_log_express)
+rm(sd_log_express)
+gc(verbose = FALSE)
+```
+
+### Epigenomic signals
+
+As above for expression signals, at each nucleotide position, the
+standard deviation over the three replicates of the epigenomic
+measurements is derived for each gene.
+
+```{r sd_epigeno,echo=FALSE}
+l_centered_epigeno1 <- Map("-", l_epigeno1, l_mean_epigeno)
+l_centered_epigeno2 <- Map("-", l_epigeno2, l_mean_epigeno)
+l_centered_epigeno3 <- Map("-", l_epigeno3, l_mean_epigeno)
+
+l_sq_epigeno1 <- lapply(l_centered_epigeno1, function(x) x^2)
+l_sq_epigeno2 <- lapply(l_centered_epigeno2, function(x) x^2)
+l_sq_epigeno3 <- lapply(l_centered_epigeno3, function(x) x^2)                      
+l_sd_epigeno <- Map("+", l_sq_epigeno1, l_sq_epigeno2)
+l_sd_epigeno <- Map("+", l_sd_epigeno, l_sq_epigeno3)
+l_sd_epigeno <- lapply(l_sd_epigeno, function(x) sqrt(x/2))
+```
+
+For the epigenomic measurements also, standard deviation highly depends
+on the mean values. After summarizing the curves of standard deviations
+and mean expressions by their mean value over the nucleotide positions,
+the following plot shows the relationship between those average standard
+deviations and mean expressions:
+
+```{r epigeno_mean_sd_plot,fig.height=6,echo=FALSE,cache=TRUE}
+mean_epigeno <- unlist(lapply(l_mean_epigeno,mean))
+sd_epigeno <- unlist(lapply(l_sd_epigeno,mean))
+plot(mean_epigeno,sd_epigeno,
+     pch=16,bty="l",col="tan1",
+     xlab="Mean epigenomic measurements",
+     ylab="Mean standard deviation",
+     main="Standard deviations and means of epigenomic measurements")
+```
+
+```{r,echo=FALSE,message=FALSE,include=FALSE,results="hide"}
+rm(l_centered_epigeno1)
+rm(l_centered_epigeno2)
+rm(l_centered_epigeno3)
+rm(l_sq_epigeno1)
+rm(l_sq_epigeno2)
+rm(l_sq_epigeno3)
+rm(l_sd_epigeno)
+rm(mean_epigeno)
+rm(sd_epigeno)
+gc(verbose = FALSE)
+```
+
+As above for expression signals, epigenomic signals are
+log$_{2}$-transformed.
+
+```{r log_mean_sd,echo=FALSE,cache=TRUE}
+l_log_epigeno1 <- lapply(l_epigeno1,function(x) log2(1+x))
+l_log_epigeno2 <- lapply(l_epigeno2,function(x) log2(1+x))
+l_log_epigeno3 <- lapply(l_epigeno3,function(x) log2(1+x))
+
+l_mean_log_epigeno <- Map("+", l_log_epigeno1, l_log_epigeno2)
+l_mean_log_epigeno <- Map("+", l_mean_log_epigeno, l_log_epigeno3)
+l_mean_log_epigeno <- lapply(l_mean_log_epigeno, function(x) x/3)
+
+l_centered_log_epigeno1 <- Map("-", l_log_epigeno1, l_mean_log_epigeno)
+l_centered_log_epigeno2 <- Map("-", l_log_epigeno2, l_mean_log_epigeno)
+l_centered_log_epigeno3 <- Map("-", l_log_epigeno3, l_mean_log_epigeno)
+
+l_sq_log_epigeno1 <- lapply(l_centered_log_epigeno1, function(x) x^2)
+l_sq_log_epigeno2 <- lapply(l_centered_log_epigeno2, function(x) x^2)
+l_sq_log_epigeno3 <- lapply(l_centered_log_epigeno3, function(x) x^2)                      
+l_sd_log_epigeno <- Map("+", l_sq_log_epigeno1, l_sq_log_epigeno2)
+l_sd_log_epigeno <- Map("+", l_sd_log_epigeno, l_sq_log_epigeno3)
+l_sd_log_epigeno <- lapply(l_sd_log_epigeno, function(x) sqrt(x/2))
+```
+
+For each nucleotide position and each gene, a coefficient of variation
+is derived to measure the variability among replicates and, for each
+gene, the global variability of the whole epigenomic signal is evaluated
+by the median coefficient of variation.
+
+The distribution of the median coefficient of variation over the genome
+is shown below:
+
+```{r cv_log_epigeno_plot,fig.height=6,echo=FALSE,cache=TRUE}
+l_cv_log_epigeno <- Map("/", l_sd_log_epigeno, l_mean_log_epigeno)     
+   # coefficient of variation
+l_cv_log_epigeno <- Map(nan_to_zero, l_cv_log_epigeno)
+
+median_cv_log_epigeno <- unlist(lapply(l_cv_log_epigeno, median, na.rm = TRUE))
+
+hist(median_cv_log_epigeno, nclass = 50, 
+     main = "log-epigenomic measurements: median coefficient of variation", 
+     bty = "l",
+     col = "orange", 
+     xlab = "Median coefficient of variation", 
+     ylab = "Counts", proba = FALSE)
+grid()
+```
+
+It is deduced from the plot above that the epigenomic signals are
+obviously much more reproducible than the expression signals, with most
+median coefficients of variation smaller than 0.04. As for expression
+signals, all genes are considered as having satisfactorily reproducible
+epigenomic signal to be kept within the subsequent analysis.
+
+```{r,echo=FALSE,message=FALSE,include=FALSE,results="hide"}
+rm(l_cv_log_epigeno)
+rm(median_cv_log_epigeno)
+rm(l_log_epigeno1)
+rm(l_log_epigeno2)
+rm(l_log_epigeno3)
+rm(l_mean_log_epigeno)
+rm(l_centered_log_epigeno1)
+rm(l_centered_log_epigeno2)
+rm(l_centered_log_epigeno3)
+rm(l_sq_log_epigeno1)
+rm(l_sq_log_epigeno2)
+rm(l_sq_log_epigeno3)
+rm(l_sd_log_epigeno)
+rm(mean_log_epigeno)
+rm(sd_log_epigeno)
+gc(verbose = FALSE)
+```
+
+# Genome-wide coding of signals
+
+Modeling genome-wide association between epigenomic ans transcriptomic 
+signals requires that both type of signals are coded by variables that are 
+identically defined for each gene. 
+
+## Summarizing signals over replicates
+
+First, for each gene, the epigenomic and transcriptomic signals are obtained by taking the mean over the replicates and applying a log$_{2}$ transformation. Consistently with the usual way of measuring the expression of a gene, the log$_{2}$ transformed sum over the nucleotide positions of the mean transcriptomic signals is also calculated. A histogram of those scalar expression values is shown below:
+
+```{r summary_over_replicates,fig.height=6,echo=FALSE,cache=TRUE}
+express_values <- log2(1+unlist(lapply(l_mean_express,
+    function(x) sum(x[-c(1:800,((length(x)-800):length(x)))]))))
+l_express <- lapply(l_mean_express,
+    function(x) log2(1+x[-c(1:800,((length(x)-800+1):length(x)))]))
+l_express_cum <- lapply(l_mean_express,
+    function(x) log2(1+cumsum(x[-c(1:800,((length(x)-800+1):length(x)))])))
+l_epigeno <- lapply(l_mean_epigeno,function(x) log2(1+x))
+
+hist(express_values, nclass = 50, 
+     main = "Scalar expression measurements over the genome", 
+     bty = "l",
+     col = "orange", 
+     xlab = "log-counts", 
+     ylab = "Frequency", proba = FALSE)
+grid()
+```
+
+## Signal alignment
+
+Within the two sequences of nucleotides before the start codon and after the stop codon, both epigenomic
+and transcriptomic signals are measured for each gene on the same grid of nucleotide positions. However,
+since the genes have different lengths, the signals are not aligned on the same grid in-between the start and stop codons.
+Since the goal is to infer on an association model between epigenome and transcriptome for all genes, signals need to be coded 
+identically for each gene.
+
+This could be done by using standard non-functional summary statistics such as mean levels over the nucleotide positions, standard deviations, number of positive peaks, and so on. The search for such summary statistics that do not explicitly account for the spatial support of signals over the nucleotide positions exposes to making choices that are not guided by a prior biological knowledge and therefore could lead to irrelevant or incomplete summaries.
+
+Our approach will aim to avoid such choices and keep as most as possible the information contained in the patterns of variations over the sequence of nucleotide. Let us consider the first two genes in the data for illustration. Their name and length is given below: 
+```{r genelength_1_and_2,echo=FALSE,cache=TRUE}
+kable(data.frame(Length=gene_length[1:2]),booktabs=TRUE,caption="Length of the first two genes in the data")
+```  
+
+
+The following plot shows the epigenomic signals of those two genes between the start and stop codons:
+```{r epigeno_plot_1_and_2,fig.height=6,echo=FALSE,caption="Epigenomic signals of two genes with different lengths"}
+select <- 1:2
+gene_name_select <- names(l_epigeno)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+plot(1:(gene_length_select[1]),l_epigeno[[select[1]]][801:(800+gene_length_select[1])],
+     type="l",col="tan4",
+     bty="l",lty=1,xlim=c(0,max(gene_length_select)),
+     ylim=range(c(l_epigeno[[select[1]]][801:(800+gene_length_select[1])],
+                  l_epigeno[[select[2]]][801:(800+gene_length_select[2])])),
+     main=paste("Epigenomic signal for genes ",paste(gene_name_select,collapse=" and ")),
+     xlab="Nucleotide positions (between start and stop codons)",
+     ylab="Chromatin accessibility")
+lines(1:(gene_length_select[2]),l_epigeno[[select[2]]][801:(800+gene_length_select[2])],
+     type="l",col="tan1")
+legend("bottomright",bty="n",col=c("tan4","tan1"),legend=gene_name_select,lty=1)
+grid()
+```
+
+Since those two genes have different lengths, the two signals are not aligned in the sense that a given nucleotide position do not correspond to the same relative distance from the start codon, expressed as a percentage of the whole gene length. The plot below shows the epigenomic signals of the two genes between the start and stop codons, when considering the nucleotide positions as their relative distance with respect to the start codon:
+```{r epigeno_plot_1_and_2_relative,fig.height=6,echo=FALSE}
+select <- 1:2
+gene_name_select <- names(l_epigeno)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+rel_positions <- lapply(gene_length_select,function(x) 100*(1:x)/x)
+plot(rel_positions[[1]],l_epigeno[[select[1]]][801:(800+gene_length_select[1])],
+     type="l",col="tan4",
+     bty="l",lty=1,xlim=c(0,100),
+     ylim=range(c(l_epigeno[[select[1]]][801:(800+gene_length_select[1])],
+                  l_epigeno[[select[2]]][801:(800+gene_length_select[2])])),
+     main=paste("Epigenomic signal for genes ",paste(gene_name_select,collapse=" and ")),
+     xlab="Nucleotide positions (percentage of the whole gene length)",
+     ylab="Chromatin accessibility")
+lines(rel_positions[[2]],l_epigeno[[select[2]]][801:(800+gene_length_select[2])],
+     type="l",col="tan1")
+legend("bottomleft",bty="n",col=c("tan4","tan1"),legend=gene_name_select,lty=1)
+grid()
+```
+
+Although the two epigenomic signals are now aligned on the same interval of relative nucleotide positions, 
+the pointwise measurements of those signals do not yet correspond to the same relative positions, as
+illustrated by the table below, giving the first five relative positions for each gene:
+
+```{r relative_1_and_2,echo=FALSE,cache=TRUE}
+df <- rbind.data.frame(rel_positions[[1]][1:5],rel_positions[[2]][1:5])
+rownames(df) <- names(rel_positions)[1:2]
+colnames(df) <- as.character(1:5)
+df <- round(df,digits=2)
+kable(df,booktabs=TRUE,caption="First five relative nucleotide positions")
+```
+
+Therefore, a common grid of relative nucleotide positions is now chosen, and the measurements of the signals
+at each point on this grid are obtained by linear interpolations between the two closest measurements. 
+The choice of this common grid is guided by a consensus between a small number of points, leading to smoothing potentially interesting
+local variations in long signals and a large number of points, which induces both a large oversampling for small genes and a large number of 
+variables in the final dataset. 
+
+Since two thirds of the genes have less than 2000 measurements, it is decided conservatively to consider a grid of 2000 regularly spaced relative 
+positions, which means that the distance between two points in this grid is 0.05%.
+
+```{r interp,echo=FALSE,cache=TRUE}
+l_epigeno_interp <- Map(function(signal,gene_length) {
+  res <- rep(0,length=3600)
+  res[1:800] <- signal[1:800]
+  res[801:(800+2000)] <- approx(x=1:gene_length,
+                                y=signal[801:(800+gene_length)],
+                                xout=seq(1,gene_length,length=2000))$y
+  res[(800+2000+1):(800+2000+800)] <- signal[(800+gene_length+1):(800+gene_length+800)]
+  res },l_epigeno,gene_length)
+
+l_express_interp <- lapply(l_express,
+  function(signal) { approx(x=1:length(signal),
+                            y=signal,
+                            xout=seq(1,length(signal),length=2000))$y })
+
+l_express_cum_interp <- lapply(l_express_cum,
+  function(signal) { approx(x=1:length(signal),
+                y=signal,
+                xout=seq(1,length(signal),length=2000))$y })
+```
+
+The largest interpolation error is supposed to be made for the longest gene, with length `r max(gene_length)`.
+The following plot superimposes the raw and interpolated curves between the start and stop codons 
+for this gene, which confirms the close approximation of the raw signal with the present choice of a
+grid of 2000 relative nucleotide positions. 
+
+```{r raw_interp_longest_gene_epigeno,fig.height=6,echo=FALSE}
+select <- which.max(gene_length)
+gene_name_select <- names(l_epigeno)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+rel_positions <- lapply(gene_length_select,function(x) 100*(1:x)/x)
+plot(rel_positions[[1]],l_epigeno[[select]][801:(800+gene_length_select)],
+     type="l",col="tan4",
+     bty="l",lty=1,xlim=c(0,100),
+     ylim=range(c(l_epigeno[[select]][801:(800+gene_length_select)],
+                  l_epigeno_interp[[select]][801:2800])),
+     main=paste("Epigenomic signal for gene ",gene_name_select),
+     xlab="Nucleotide positions  between start and stop codons (percentage of the whole gene length)",
+     ylab="Chromatin accessibility")
+lines(100*(1:2000)/2000,l_epigeno_interp[[select]][801:2800],
+     type="l",col="tan1")
+legend("bottomright",bty="n",col=c("tan4","tan1"),legend=c("Raw signal","Interpolated signal"),lty=1)
+grid()
+```
+
+A similar plot is produced for the same gene with the raw and interpolated transcriptomic signals:
+
+```{r raw_interp_longest_gene_express,fig.height=6,echo=FALSE}
+select <- which.max(gene_length)
+gene_name_select <- names(l_epigeno)[select]
+signal_length_select <- unlist(signal_length)[select]
+gene_length_select <- signal_length_select-1600
+rel_positions <- lapply(gene_length_select,function(x) 100*(1:x)/x)
+plot(rel_positions[[1]],l_express[[select]],
+     type="l",col="tan4",
+     bty="l",lty=1,xlim=c(0,100),
+     ylim=range(c(l_express[[select]],
+                  l_express_interp[[select]])),
+     main=paste("Transcriptomic signal for gene ",gene_name_select),
+     xlab="Nucleotide positions  between start and stop codons (percentage of the whole gene length)",
+     ylab="Read counts")
+lines(100*(1:2000)/2000,l_express_interp[[select]],
+     type="l",col="tan1")
+legend("topleft",bty="n",col=c("tan4","tan1"),legend=c("Raw signal","Interpolated signal"),lty=1)
+grid()
+```
+
+```{r create_datasets,echo=FALSE,cache=TRUE,eval=FALSE}
+express_interp <- matrix(unlist(l_express_interp),byrow=TRUE,
+                         nrow=length(l_express_interp))
+express_cum_interp <- matrix(unlist(l_express_cum_interp),byrow=TRUE,
+                         nrow=length(l_express_cum_interp))
+epigeno_interp <- matrix(unlist(l_epigeno_interp),byrow=TRUE,
+                         nrow=length(l_epigeno_interp))
+write.table(express_interp,"express_interp.txt")
+write.table(express_cum_interp,"express_cum_interp.txt")
+write.table(epigeno_interp,"epigeno_interp.txt")
+write.table(express_values,"express.txt")
+write.table(gene_length,"genelength.txt")
+write.table(gene_names,"genenames.txt")
+```

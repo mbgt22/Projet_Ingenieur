@@ -923,7 +923,7 @@ express_values <- log2(1+unlist(lapply(l_mean_express,
 l_express <- lapply(l_mean_express,
     function(x) log2(1+x[-c(1:800,((length(x)-800+1):length(x)))]))
 l_express_cum <- lapply(l_mean_express,
-    function(x) log2(1+cumsum(x[-c(1:800,((length(x)-800+1):length(x)))])))
+    function(x) log2(1+cumsum(x[-c(1:800,((length(x)-800+1):length(x)))])))## Valeur cumulé avec cumsum ( renvoie le vecteur des valeurs cumulées  - permet de mieux interpolé)
 l_epigeno <- lapply(l_mean_epigeno,function(x) log2(1+x))
 
 hist(express_values, nclass = 50, 
@@ -1028,7 +1028,7 @@ l_express_interp <- lapply(l_express,
                             y=signal,
                             xout=seq(1,length(signal),length=2000))$y })
 
-l_express_cum_interp <- lapply(l_express_cum,
+l_express_cum_interp <- lapply(l_express_cum, ## Interpolation sur valeur cumulé 
   function(signal) { approx(x=1:length(signal),
                 y=signal,
                 xout=seq(1,length(signal),length=2000))$y })
